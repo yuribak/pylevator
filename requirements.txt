@@ -1,0 +1,4 @@
+asciimatics==1.6.0
+future==0.15.2
+Pillow==3.2.0
+pyfiglet==0.7.5
