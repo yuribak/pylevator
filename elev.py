@@ -4,10 +4,12 @@ from functools import total_ordering
 
 from asciimatics.screen import Screen
 
+from strategy import idle
+
 FRAME_W = 150
 ELEV_W = 15
 
-GAME_TIME = 2
+GAME_TIME = 60
 GAME_SECOND = .2
 RPS = 5
 
@@ -100,39 +102,6 @@ class Elevator(object):
         pass
 
 
-def idle_sequential(e, floors):
-    e.target = (e.pos + 1) % floors
-
-
-def idle_random(e, floors):
-    e.target = random.randint(0, len(floors) - 1)
-
-
-def idle_real(e, floors):
-    going_up = e.ctx.setdefault('going_up', True)
-    target = None
-    if going_up:
-        up = [r for r in e.load if r > e.pos]
-        if up:
-            target = min(up).target
-        else:
-            going_up = False
-    if not going_up:
-        down = [r for r in e.load if r < e.pos]
-        if down:
-            target = max(down).target
-        else:
-            going_up = True
-    if target is not None:
-        e.target = target
-        e.ctx['going_up'] = going_up
-    else:
-        waiting = [f for f in range(len(floors)) if floors[f]]
-        if waiting:
-            e.target = min(waiting, key=lambda x: abs(e.pos - x))
-            e.ctx['going_up'] = e.target > e.pos
-
-
 def draw_rect(screen, w, h, x, y, hchar='#', vchar='|'):
     # top
     screen.move(x, y)
@@ -149,9 +118,6 @@ def draw_rect(screen, w, h, x, y, hchar='#', vchar='|'):
     # left
     screen.move(x, y + h - 2)
     screen.draw(x, y, char=vchar)
-
-
-idle = idle_real
 
 
 class Display(object):
@@ -178,7 +144,7 @@ class Display(object):
 
         # elevator positions
         for i, e in enumerate(elevators):
-            self.print_elevator(i, e.old_pos, c=' ' * (len(str(e))+2))
+            self.print_elevator(i, e.old_pos, c=' ' * (len(str(e)) + 2))
             self.print_elevator(i, e.pos, c=str(e), color=e.state)
 
         # rider counds
