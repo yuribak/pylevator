@@ -1,6 +1,7 @@
 import random
 import time
 from functools import total_ordering
+from itertools import count
 
 from asciimatics.screen import Screen
 
@@ -9,9 +10,9 @@ from strategy import idle
 FRAME_W = 150
 ELEV_W = 15
 
-GAME_TIME = 60
+GAME_TIME = 5
 GAME_SECOND = .2
-RPS = 5
+RPS = 4
 
 
 @total_ordering
@@ -22,6 +23,8 @@ class Rider(object):
     time_alive = 0.
     time_riding = 0.
 
+    IDS = count()
+
     def __init__(self, target):
         Rider.produced += 1
         self.target = target
@@ -29,11 +32,16 @@ class Rider(object):
         self.load_time = None
         self.death = self.birth_time + 20 * GAME_SECOND
 
+        self.id = Rider.IDS.next()
+
     def __gt__(self, other):
         return self.target > other.target if isinstance(other, Rider) else self.target > other
 
     def __eq__(self, other):
         return self.target == other.target if isinstance(other, Rider) else self.target == other
+
+    def __repr__(self):
+        return str(self.target)
 
     def load(self):
         self.load_time = time.time()
@@ -56,6 +64,8 @@ class Elevator(object):
     SEND = 2
     FETCH = 5
 
+    IDS = count()
+
     def __init__(self, pos):
         self.pos = pos
         self.old_pos = 0
@@ -63,6 +73,7 @@ class Elevator(object):
         self.state = Elevator.IDLE
         self.target = 0
         self.ctx = {}
+        self.id = Elevator.IDS.next()
 
     def __repr__(self):
         return '[{}>{}]'.format(len(self.load), self.target)
@@ -84,13 +95,6 @@ class Elevator(object):
             self.load.append(r)
 
         del floor[:d]
-
-    def idle(self):
-        # position
-        # list of waiting riders
-        # other elevators?
-        return  # (target)
-        pass
 
     def load(self):
         pass
@@ -170,9 +174,9 @@ class Game(object):
             e.old_pos = e.pos
 
             if e.pos < e.target:
-                e.pos = e.old_pos + 1
+                e.pos += 1
             elif e.pos > e.target:
-                e.pos = e.old_pos - 1
+                e.pos -= 1
             else:
                 e.pos = e.old_pos
 
@@ -188,7 +192,8 @@ class Game(object):
         for e in self.elevators:
             if e.state == Elevator.IDLE:
                 e.re_load(self.floors[e.pos])
-                idle(e, self.floors)
+                t = idle(e, self.floors)
+                e.target =  t if t is not None else e.pos
 
         self.move_elevators()
 
