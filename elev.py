@@ -1,16 +1,22 @@
 import random
-import time
 from functools import total_ordering
 from itertools import count
+from time import sleep
 
 from asciimatics.screen import Screen
 
-from strategy import idle
+from strategy import next_stop
+from utils import Timer
 
+LIFE_EXPECTANCY = 20
+
+FLOOR_COUNT = 20
+ELEV_COUNT = 4
+FAST_MODE = True
 FRAME_W = 150
 ELEV_W = 15
 
-GAME_TIME = 5
+GAME_TIME = 100
 GAME_SECOND = .2
 RPS = 4
 
@@ -25,12 +31,14 @@ class Rider(object):
 
     IDS = count()
 
-    def __init__(self, target):
+    def __init__(self, target, game):
         Rider.produced += 1
         self.target = target
-        self.birth_time = time.time()
+        self.game = game
+        self.timer = Timer.timer(game)
+        self.init_time = self.timer.time()
         self.load_time = None
-        self.death = self.birth_time + 20 * GAME_SECOND
+        self.death = self.init_time + LIFE_EXPECTANCY * GAME_SECOND
 
         self.id = Rider.IDS.next()
 
@@ -44,15 +52,15 @@ class Rider(object):
         return str(self.target)
 
     def load(self):
-        self.load_time = time.time()
+        self.load_time = self.timer.time()
         Rider.riding += 1
         pass
 
     def unload(self):
         Rider.delivered += 1
         Rider.riding -= 1
-        t = time.time()
-        Rider.time_alive += t - self.birth_time
+        t = self.timer.time()
+        Rider.time_alive += t - self.init_time
         Rider.time_riding += t - self.load_time
 
 
@@ -184,16 +192,18 @@ class Game(object):
         pool = range(len(self.floors))
         for _ in xrange(RPS):
             s, t = random.sample(pool, 2)
-
-            self.floors[s].append(Rider(t))
+            self.floors[s].append(Rider(t, self))
 
     def update_state(self):
         # IDLE
         for e in self.elevators:
             if e.state == Elevator.IDLE:
                 e.re_load(self.floors[e.pos])
-                t = idle(e, self.floors)
-                e.target =  t if t is not None else e.pos
+                t = next_stop(e.pos, [r.target for r in e.load], map(len, self.floors), e.ctx)
+                e.target = t if t is not None else e.pos
+
+        for floor in self.floors:
+            floor[:] = [r for r in floor if r.timer.time() < LIFE_EXPECTANCY]
 
         self.move_elevators()
 
@@ -215,22 +225,25 @@ class Game(object):
 
 
 def main(s):
-    floor_count = 20
-    elev_count = 4
+    floor_count = FLOOR_COUNT
+    elev_count = ELEV_COUNT
 
     g = Game(s, floor_count, elev_count)
 
-    start_time = time.time()
+    t = Timer.timer(g)
 
-    while time.time() < start_time + GAME_TIME:
+    while t.time() < GAME_TIME:
 
-        current_frame = time.time()
+        current_frame = t.time()
 
         g.update()
 
-        d = GAME_SECOND - (time.time() - current_frame)
+        d = GAME_SECOND - (t.time() - current_frame)
         if d > 0:
-            time.sleep(d)
+            if FAST_MODE:
+                t.skip(d)
+            else:
+                sleep(d)
 
 
 try:

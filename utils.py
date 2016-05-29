@@ -1,5 +1,6 @@
 import logging
 from logging import FileHandler
+import time
 
 LEVEL_TRACE = 2
 
@@ -17,4 +18,23 @@ def getLogger(logger_name, file_name):
     return logger
 
 
+class Timer(object):
 
+    TIMERS = {}
+
+    @staticmethod
+    def timer(timer_name):
+        return Timer.TIMERS.setdefault(timer_name, Timer())
+
+    def __init__(self):
+        self.start = time.time()
+        self.offset = 0
+
+    def time(self):
+        return time.time() - self.start + self.offset
+
+    def skip(self, s):
+        self.offset += s
+
+
+t = Timer()
