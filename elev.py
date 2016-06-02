@@ -1,117 +1,14 @@
 import random
-from functools import total_ordering
-from itertools import count
 from time import sleep
 
 from asciimatics.screen import Screen
 
+from model import Elevator, Rider
 from strategy import next_stop
 from utils import Timer
 
-LIFE_EXPECTANCY = 20
-
-FLOOR_COUNT = 20
-ELEV_COUNT = 4
-FAST_MODE = True
 FRAME_W = 150
-ELEV_W = 15
-
-GAME_TIME = 100
-GAME_SECOND = .2
-RPS = 4
-
-
-@total_ordering
-class Rider(object):
-    produced = 0
-    delivered = 0
-    riding = 0
-    time_alive = 0.
-    time_riding = 0.
-
-    IDS = count()
-
-    def __init__(self, target, game):
-        Rider.produced += 1
-        self.target = target
-        self.game = game
-        self.timer = Timer.timer(game)
-        self.init_time = self.timer.time()
-        self.load_time = None
-        self.death = self.init_time + LIFE_EXPECTANCY * GAME_SECOND
-
-        self.id = Rider.IDS.next()
-
-    def __gt__(self, other):
-        return self.target > other.target if isinstance(other, Rider) else self.target > other
-
-    def __eq__(self, other):
-        return self.target == other.target if isinstance(other, Rider) else self.target == other
-
-    def __repr__(self):
-        return str(self.target)
-
-    def load(self):
-        self.load_time = self.timer.time()
-        Rider.riding += 1
-        pass
-
-    def unload(self):
-        Rider.delivered += 1
-        Rider.riding -= 1
-        t = self.timer.time()
-        Rider.time_alive += t - self.init_time
-        Rider.time_riding += t - self.load_time
-
-
-class Elevator(object):
-    CAPACITY = 12
-
-    IDLE = 3
-    LOAD = 1
-    SEND = 2
-    FETCH = 5
-
-    IDS = count()
-
-    def __init__(self, pos):
-        self.pos = pos
-        self.old_pos = 0
-        self.load = []
-        self.state = Elevator.IDLE
-        self.target = 0
-        self.ctx = {}
-        self.id = Elevator.IDS.next()
-
-    def __repr__(self):
-        return '[{}>{}]'.format(len(self.load), self.target)
-
-    # load/unload riders
-
-    def re_load(self, floor):
-        re_load = []
-        for r in self.load:
-            if r == self.pos:
-                r.unload()
-                continue
-            re_load.append(r)
-        self.load = re_load
-
-        d = self.CAPACITY - len(self.load)
-        for r in floor[:d]:
-            r.load()
-            self.load.append(r)
-
-        del floor[:d]
-
-    def load(self):
-        pass
-
-    def send(self):
-        pass
-
-    def fetch(self):
-        pass
+ELEV_W = 11
 
 
 def draw_rect(screen, w, h, x, y, hchar='#', vchar='|'):
@@ -133,10 +30,11 @@ def draw_rect(screen, w, h, x, y, hchar='#', vchar='|'):
 
 
 class Display(object):
-    def __init__(self, screen, floor_count, elev_count):
+    def __init__(self, screen, floor_count, elev_count, game):
         self.screen = screen
         self.floor_count = floor_count
         self.elev_count = elev_count
+        self.game = game
 
         self.frame_w, self.frame_h, self.frame_x, self.frame_y = FRAME_W, floor_count + 2, 3, 3
         self.frame_x2, self.frame_y2 = self.frame_x + self.frame_w - 1, self.frame_y + self.frame_h - 1
@@ -161,20 +59,46 @@ class Display(object):
 
         # rider counds
         for f in xrange(len(floors)):
-            m = str(len(floors[f]))
-            self.screen.print_at('    ', self.frame_x + 2, self.frame_y + self.frame_h - 2 - f)
-            self.screen.print_at(m, self.frame_x + 2, self.frame_y + self.frame_h - 2 - f)
+            m = len(floors[f])
+            self.screen.print_at(' ' * 20, self.frame_x + 2, self.frame_y + self.frame_h - 2 - f)
+
+            label = '{:<10}{:<3}({})'.format('*' * min(m, 10), '...' if m > 10 else '', m)
+            self.screen.print_at(label, self.frame_x + 2, self.frame_y + self.frame_h - 2 - f)
+
+        # stats:
+        self.screen.print_at(' ' * self.frame_w, self.frame_x, self.frame_y - 1)
+        self.screen.print_at(
+            'Time: {:<6.1f}, Produced: {:<6}, Delivered: {:<6} ({:<2.0f}%), Died: {:<6} ({:2.0f}%)'.format(
+                Timer.timer(self.game).time(),
+                self.game.produced,
+                self.game.delivered,
+                100.0 * self.game.delivered / self.game.produced,
+                self.game.died,
+                100.0 * self.game.died / self.game.produced,
+            ),
+            self.frame_x,
+            self.frame_y - 1
+        )
 
         self.screen.refresh()
 
 
 class Game(object):
-    def __init__(self, screen, floor_count, elev_count):
+    def __init__(self, screen, floor_count, elev_count, life_expectancy, rps):
 
-        self.display = Display(screen, floor_count, elev_count)
+        self.life_expectancy = life_expectancy
+        self.rps = rps
+
+        self.display = Display(screen, floor_count, elev_count, self)
 
         self.floors = [list() for _ in xrange(floor_count)]
         self.elevators = [Elevator(random.randint(0, floor_count - 1)) for _ in xrange(elev_count)]
+
+        self.timer = Timer.timer(self)
+
+        self.delivered = 0
+        self.produced = 0
+        self.died = 0
 
     def move_elevators(self):
 
@@ -190,23 +114,46 @@ class Game(object):
 
     def generate_riders(self):
         pool = range(len(self.floors))
-        for _ in xrange(RPS):
+        for _ in xrange(self.rps):
             s, t = random.sample(pool, 2)
-            self.floors[s].append(Rider(t, self))
+            self.floors[s].append(Rider(t))
+            self.floors[s][-1].init_time = self.timer.time()
+            self.produced += 1
 
     def update_state(self):
-        # IDLE
+        self.handle_stopped()
+        self.kill_riders()
+        self.move_elevators()
+        self.update_elevator_state()
+        self.generate_riders()
+
+    def handle_stopped(self):
         for e in self.elevators:
             if e.state == Elevator.IDLE:
-                e.re_load(self.floors[e.pos])
+                # reload
+                d = len(e.load)
+                e.load = [r for r in e.load if r.target != e.pos]
+                d -= len(e.load)
+                self.delivered += d
+
+                d = e.CAPACITY - len(e.load)
+                e.load += self.floors[e.pos][:d]
+                del self.floors[e.pos][:d]
+
+                # compute next stop
                 t = next_stop(e.pos, [r.target for r in e.load], map(len, self.floors), e.ctx)
                 e.target = t if t is not None else e.pos
+                assert 0 <= e.target < len(self.floors)
 
+    def kill_riders(self):
+        now = self.timer.time()
         for floor in self.floors:
-            floor[:] = [r for r in floor if r.timer.time() < LIFE_EXPECTANCY]
+            d = len(floor)
+            floor[:] = [r for r in floor if now - r.init_time < self.life_expectancy]
+            d -= len(floor)
+            self.died += d
 
-        self.move_elevators()
-
+    def update_elevator_state(self):
         for e in self.elevators:
             if e.pos == e.target:
                 e.state = Elevator.IDLE
@@ -216,42 +163,52 @@ class Game(object):
                 else:
                     e.state = Elevator.FETCH
 
-        self.generate_riders()
-
     def update(self):
 
         self.update_state()
         self.display.update_display(self.elevators, self.floors)
 
 
-def main(s):
-    floor_count = FLOOR_COUNT
-    elev_count = ELEV_COUNT
+def elev(
+        life_expectancy,
+        floor_count,
+        elev_count,
+        fast_mode,
+        game_time,
+        game_second,
+        rps
+):
+    def main(s):
 
-    g = Game(s, floor_count, elev_count)
+        g = Game(s, floor_count, elev_count, life_expectancy, rps)
 
-    t = Timer.timer(g)
+        t = Timer.timer(g)
 
-    while t.time() < GAME_TIME:
+        while t.time() < game_time:
 
-        current_frame = t.time()
+            current_frame = t.time()
 
-        g.update()
+            g.update()
 
-        d = GAME_SECOND - (t.time() - current_frame)
-        if d > 0:
-            if FAST_MODE:
-                t.skip(d)
-            else:
-                sleep(d)
+            d = game_second - (t.time() - current_frame)
+            if d > 0:
+                if fast_mode:
+                    t.skip(d)
+                else:
+                    sleep(d)
+
+    try:
+        Screen.wrapper(main)
+    except KeyboardInterrupt:
+        pass
 
 
-try:
-    Screen.wrapper(main)
-except KeyboardInterrupt:
-    pass
-
-print 'Riders:', Rider.produced
-print 'Delivered', Rider.delivered
-print 'Average alive time:', Rider.time_alive / Rider.produced
-print 'Average ride time:', Rider.time_riding / Rider.delivered
+elev(
+    life_expectancy=4,
+    floor_count=40,
+    elev_count=12,
+    fast_mode=False,
+    game_time=100,
+    game_second=.2,
+    rps=4
+)

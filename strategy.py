@@ -34,9 +34,10 @@ def next_stop_real(pos, load, floors, ctx):
         target = funcs[going_up]()
 
     if target is None:
-        waiting = [f for i, f in enumerate(floors) if f and f != pos]
+        waiting = [i for i, f in enumerate(floors) if f and i != pos]
         if waiting:
             target = min(waiting, key=lambda x: abs(pos - x))
+
             going_up = target > pos
 
     if target is None:
